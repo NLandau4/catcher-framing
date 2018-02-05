@@ -1,0 +1,111 @@
+#Hedges framing Machine Learning models
+
+install.packages("caret")
+install.packages("C50")
+library(caret)
+library(C50)
+
+hedges <- read.csv("Hedges.csv")
+
+hedges2 <- subset(hedges, description == "called_strike" | description == "ball")
+
+set.seed(42)
+hedges2$description <-factor(hedges2$description) 
+hedges2$zone <- factor(hedges2$zone)
+hedges2$pitch_type <- factor(hedges2$pitch_type)
+hedges2$stand <- factor(hedges2$stand)
+
+str(hedges2)
+
+h.fold <- createFolds(hedges2$description, k = 5)
+
+# Create reusable trainControl object: myControl
+h.control <- trainControl(
+  summaryFunction = twoClassSummary,
+  classProbs = TRUE, 
+  verboseIter = TRUE,
+  savePredictions = TRUE,
+  index = h.fold
+)
+
+
+#glmnet model
+model_glmnet <- train(
+  description ~ zone + pitch_type, hedges2,
+  metric = "ROC",
+  method = "glmnet",
+  tuneGrid = expand.grid(
+    alpha = 0:1,
+    lambda = 0:10/10
+  ),
+  trControl = h.control
+)
+
+summary(model_glmnet)
+
+plot(model_glmnet)
+plot(model_glmnet$finalModel)
+
+m <- margins(model_glmnet)
+
+#random forst model 
+model_rf <- train(
+  description ~ zone + pitch_type, hedges2,
+  metric = "ROC",
+  method = "ranger",
+  trControl = h.control)
+
+plot(model_rf)
+print(model_rf)
+
+model_list <- list(glmnet = model_glmnet, rf = model_rf)
+
+resamps <- resamples(model_list)
+resamps
+
+print(resamples)
+
+summary(resamps)
+
+bwplot(resamps, metric = "ROC")
+dotplot(resamps, metric = "ROC")
+densityplot(resamps, metric = "ROC")
+
+
+
+library(dplyr)
+
+p <- predict(model_rf, response = TRUE)
+hedges2$predicted <- predict(model_rf, response = TRUE)
+hedges2$residuals <- residuals(model_rf, response = TRUE)
+hedges2 %>% select(description, predicted) %>% head()
+
+model_rf_cmat <- confusionMatrix(model_rf)
+model_rf_cmat
+
+
+library(ggplot2)
+plot(p, hedges2$description, xlab="predicted", ylab = "actual")
+
+plot(model_rf$finalModel)
+
+model_plate <- train(
+  description ~ zone + pfx_x + pfx_z + pitch_type + stand, hedges2,
+  metric = "ROC",
+  method = "ranger",
+  trControl = h.control)
+
+hedges2$probability1 <- predict(model_rf, type = "prob")
+
+hedges3 <- subset(hedges2, select = -c(prob) )
+
+hedges2$probability <- predict(model_rf, se.fit = TRUE, type = "prob")$fit
+head(predict(model_rf, h.control, type="prob"))
+
+ggplot(hedges2, aes(zone, csprob)) + geom_line()
+head(hedges2$probability1.called_strike)
+
+str(hedges2)
+hedges2$csprob <- hedges2$probability1$called_strike
+
+ggplot(hedges2, aes(zone, csprob)) + geom_line()
