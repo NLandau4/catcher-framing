@@ -1,4 +1,5 @@
 #Hedges framing Machine Learning models
+#Not all code is valid, some experimental
 
 install.packages("caret")
 install.packages("C50")
