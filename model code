@@ -1,0 +1,259 @@
+#Hedges framing Machine Learning models
+
+install.packages("caret")
+install.packages("C50")
+library(caret)
+library(C50)
+
+hedges <- read.csv("Hedges.csv")
+
+hedges2 <- subset(hedges, description == "called_strike" | description == "ball")
+
+set.seed(42)
+hedges2$description <-factor(hedges2$description) 
+hedges2$zone <- factor(hedges2$zone)
+hedges2$pitch_type <- factor(hedges2$pitch_type)
+hedges2$stand <- factor(hedges2$stand)
+
+str(hedges2)
+
+h.fold <- createFolds(hedges2$description, k = 5)
+
+# Create reusable trainControl object: h.control
+h.control <- trainControl(
+  summaryFunction = twoClassSummary,
+  classProbs = TRUE, 
+  verboseIter = TRUE,
+  savePredictions = TRUE,
+  index = h.fold
+)
+
+
+#glmnet model
+model_glmnet <- train(
+  description ~ zone + pitch_type, hedges2,
+  metric = "ROC",
+  method = "glmnet",
+  tuneGrid = expand.grid(
+    alpha = 0:1,
+    lambda = 0:10/10
+  ),
+  trControl = h.control
+)
+
+summary(model_glmnet)
+
+plot(model_glmnet)
+plot(model_glmnet$finalModel)
+
+max(model_glmnet[["results"]][["ROC"]])
+
+m <- margins(model_glmnet)
+
+#random forst model 
+model_rf <- train(
+  description ~ zone + pitch_type, hedges2,
+  metric = "ROC",
+  method = "ranger",
+  trControl = h.control)
+
+plot(model_rf)
+print(model_rf)
+
+model_list <- list(glmnet = model_glmnet, rf = model_rf)
+
+resamps <- resamples(model_list)
+resamps
+
+summary(resamps)
+
+bwplot(resamps, metric = "ROC")
+dotplot(resamps, metric = "ROC")
+densityplot(resamps, metric = "ROC")
+
+
+library(dplyr)
+
+p <- predict(model_rf, response = TRUE)
+hedges2$predicted <- predict(model_rf, response = TRUE)
+hedges2$residuals <- residuals(model_rf, response = TRUE)
+hedges2 %>% select(description, predicted) %>% head()
+
+model_rf_cmat <- confusionMatrix(model_rf)
+model_rf_cmat
+
+
+library(ggplot2)
+plot(p, hedges2$description, xlab="predicted", ylab = "actual")
+
+plot(model_rf$finalModel)
+
+hedges2$probability1 <- predict(model_rf, type = "prob")
+
+
+hedges2$probability <- predict(model_rf, se.fit = TRUE, type = "prob")$fit
+
+
+ggplot(hedges2, aes(zone, csprob)) + geom_line()
+
+str(hedges2)
+hedges2$csprob <- hedges2$probability1$called_strike
+
+ggplot(hedges2, aes(zone, csprob)) + geom_line() 
+
+px <- rep(seq(from = 1.5, to = 1.5, by =1,), each = 5) 
+pz <- rep(seq(from = 4.5, to = 0.5, by = -1), each = 5)         
+zone <- seq(from = 1, to = 14, by = 1)
+locgrid <- data.frame(zone, px, pz)
+locgrid
+
+str(hedges2$pfx_x)
+
+
+take_r <- subset(hedges2, stand == "R")
+take_l <- subset(hedges2, stand == "L")
+
+zone_take_r <- round(tapply(take_r$csprob, take_r$zone, mean), 3)
+zone_take_l <- round(tapply(take_l$csprob, take_l$zone, mean), 3)
+
+zone_take_r
+zone_take_l
+
+locgrid <- data.frame(hedges)
+
+zone_take_r11 <- zone_take_r1[-6030:-6323]
+zone_take_r3 <- data.frame(zone_take_r11, zone_take_r2)
+
+zone_take_r1
+
+locgrid <- merge(locgrid, zone_take_r, by = zone, all.x = TRUE) 
+locgrid <- merge(locgrid, zone_take_l, by = zone, all.x = TRUE)
+
+p_plot <- ggplot(data = take_r, aes(x = pfx_x, y = pfx_z)) 
+p_plot + geom_tile(aes(fill = take_r$csprob)) + 
+  scale_fill_gradientn(name = "Contact Rate", 
+                       limits = c(0.5, 1), 
+                       breaks = seq(from = 0.5, to = 1, by = 0.1), 
+                       colors = c(brewer.pal(n = 7, name = "Reds"))) + annotate("text", x = take_r$csprob , y = take_r$csprob, 
+                                                                                label = "csprob", size = 5)
+hedges2r <- merge(hedges2, zone_take_r, by = zone, all.x = T)
+zone_take_r
+
+
+
+
+
+
+ggplot(kZone, aes(x=x, y=y)) + geom_tile(data=hedges2, aes(pfx_x, pfx_z, color = csprob), size = 1, position = "jitter") +  geom_path(lwd=1.5, col="black")
+ggplot(hedges2, aes(pfx_x, pfx_z)) + geom_tile(aes(fill = csprob), size = 2) + 
+  scale_fill_gradientn(name = "Contact Rate", 
+                       limits = c(0.5, 1), 
+                       breaks = seq(from = 0.5, to = 1, by = 0.1), 
+                       colors = c(brewer.pal(n = 7, name = "Reds")))
+  
+  geom_point(position = position_jitter(0.1), alpha = 0.5) + geom_abline(aes(hedges2$csprob))
+
+
+
+
+p_plot_axis_RHB <- p_plot + 
+  ggtitle("RHB CS Probability") + 
+  labs(x = "Horizontal Location(ft.; Catcher's View)", 
+       y = "Vertical Location (ft.)") + 
+  theme(plot.title = element_text(size = 15))
+
+p_plot_axis_LHB <- p_plot + 
+  ggtitle("LHB CS Probabiity") + 
+  labs(x = "Horizontal Location (ft.; Catcher's View)", 
+       y = "Vertical Location (ft.)") + 
+  theme(plot.title = element_text(size = 15))
+
+install.packages("RColorBrewer")
+library(RColorBrewer)
+
+topKzone <- 3.5
+botKzone <- 1.6
+inKzone <- -0.95
+outKzone <- 0.95
+kZone <- data.frame(
+  x=c(inKzone, inKzone, outKzone, outKzone, inKzone),
+  y=c(botKzone, topKzone, topKzone, botKzone, botKzone)
+)
+
+ggplot(hedges2, aes(pfx_x, pfx_z, color = csprob)) + geom_density_2d() + stat_density_2d(aes(color = ..level..))
+hedges2
+
+ggplot(take_l, aes(zone, csprob, color = pitch_type)) + scale_color_brewer(palette="Paired")+ geom_point() + ggtitle("CS, PT for LHB") + labs(x = "Zone", y = "CS Probability")
+  
+
+league.f <- read.csv("savant_data-9.csv")
+league.f <- subset(league.f, description == "called_strike" | description == "ball")
+str(league.f)
+
+league.f$zone <- factor(league.f$zone)
+league.f$pitch_type <- factor(league.f$pitch_type)
+league.f$description <- factor(league.f$description)
+str(league.f)
+
+set.seed(42)
+h.fold.l <- createFolds(league.f$description, k = 5)
+
+h.control.l <- trainControl(
+  summaryFunction = twoClassSummary,
+  classProbs = TRUE, 
+  verboseIter = TRUE,
+  savePredictions = TRUE,
+  index = h.fold.l
+)
+
+model_rf.l <- train(
+  description ~ zone + pitch_type, league.f,
+  metric = "ROC",
+  method = "ranger",
+  trControl = h.control.l)
+
+plot(model_rf.l)
+print(model_rf.l)
+summary(model_rf.l)
+
+p.l <- predict(model_rf.l, response = TRUE)
+model_rf_cmat.l <- confusionMatrix(model_rf.l)
+model_rf_cmat.l
+league.f$predicted <- predict(model_rf.l, response = TRUE)
+
+league.f$probability <- predict(model_rf.l, type = "prob")
+league.f$csprob <- league.f$probability$called_strike
+
+league.f_r <- subset(league.f, stand == "R")
+league.f_l <- subset(league.f, stand =="L")
+
+zone_r_league <- round(tapply(league.f_r$csprob, league.f_r$zone, mean), 3)
+zone_l_league <- round(tapply(league.f_l$csprob, league.f_l$zone, mean), 3)
+
+zone_r_league
+zone_l_league
+
+0.779 - 0.684
+
+zone_take_r 
+
+0.69-0.781
+0.758 - 0.727
+0.764 - 0.879
+0.731-0.828
+0.077-0.085
+0.097-0.081
+0.099-0.113
+0.070-0.086
+
+zone_take_l
+zone_l_league
+
+0.684 - 0.779
+0.756-0.734
+0.764 - 0.871
+0.727-0.832
+0.077 - 0.088
+0.095 - 0.069
+0.097 - 0.114
+0.069 - 0.085
